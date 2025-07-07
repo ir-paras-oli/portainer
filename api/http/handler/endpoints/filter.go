@@ -11,6 +11,7 @@ import (
 	portainer "github.com/portainer/portainer/api"
 	"github.com/portainer/portainer/api/dataservices"
 	"github.com/portainer/portainer/api/http/handler/edgegroups"
+	"github.com/portainer/portainer/api/http/security"
 	"github.com/portainer/portainer/api/internal/edge"
 	"github.com/portainer/portainer/api/internal/endpointutils"
 	"github.com/portainer/portainer/api/slicesx"
@@ -140,6 +141,7 @@ func (handler *Handler) filterEndpointsByQuery(
 	groups []portainer.EndpointGroup,
 	edgeGroups []portainer.EdgeGroup,
 	settings *portainer.Settings,
+	context *security.RestrictedRequestContext,
 ) ([]portainer.Endpoint, int, error) {
 	totalAvailableEndpoints := len(filteredEndpoints)
 
@@ -181,9 +183,14 @@ func (handler *Handler) filterEndpointsByQuery(
 	}
 
 	// filter edge environments by trusted/untrusted
+	// only portainer admins are allowed to see untrusted environments
 	filteredEndpoints = filter(filteredEndpoints, func(endpoint portainer.Endpoint) bool {
 		if !endpointutils.IsEdgeEndpoint(&endpoint) {
 			return true
+		}
+
+		if query.edgeDeviceUntrusted {
+			return !endpoint.UserTrusted && context.IsAdmin
 		}
 
 		return endpoint.UserTrusted == !query.edgeDeviceUntrusted
@@ -290,7 +297,9 @@ func filterEndpointsByEdgeStack(endpoints []portainer.Endpoint, edgeStackId port
 		n := 0
 		for _, envId := range envIds {
 			edgeStackStatus, err := datastore.EdgeStackStatus().Read(edgeStackId, envId)
-			if err != nil {
+			if dataservices.IsErrObjectNotFound(err) {
+				continue
+			} else if err != nil {
 				return nil, errors.WithMessagef(err, "Unable to retrieve edge stack status for environment %d", envId)
 			}
 
