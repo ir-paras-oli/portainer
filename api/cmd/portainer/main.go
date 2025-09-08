@@ -49,6 +49,7 @@ import (
 	"github.com/portainer/portainer/api/stacks/deployments"
 	"github.com/portainer/portainer/pkg/build"
 	"github.com/portainer/portainer/pkg/featureflags"
+	"github.com/portainer/portainer/pkg/fips"
 	"github.com/portainer/portainer/pkg/libhelm"
 	libhelmtypes "github.com/portainer/portainer/pkg/libhelm/types"
 	"github.com/portainer/portainer/pkg/libstack/compose"
@@ -59,7 +60,7 @@ import (
 )
 
 func initCLI() *portainer.CLIFlags {
-	cliService := &cli.Service{}
+	cliService := cli.Service{}
 
 	flags, err := cliService.ParseFlags(portainer.APIVersion)
 	if err != nil {
@@ -306,8 +307,19 @@ func initKeyPair(fileService portainer.FileService, signatureService portainer.D
 	return generateAndStoreKeyPair(fileService, signatureService)
 }
 
+// dbSecretPath build the path to the file that contains the db encryption
+// secret. Normally in Docker this is built from the static path inside
+// /run/portainer for example: /run/portainer/<keyFilenameFlag> but for ease of
+// use outside Docker it also accepts an absolute path
+func dbSecretPath(keyFilenameFlag string) string {
+	if path.IsAbs(keyFilenameFlag) {
+		return keyFilenameFlag
+	}
+	return path.Join("/run/portainer", keyFilenameFlag)
+}
+
 func loadEncryptionSecretKey(keyfilename string) []byte {
-	content, err := os.ReadFile(path.Join("/run/secrets", keyfilename))
+	content, err := os.ReadFile(keyfilename)
 	if err != nil {
 		if os.IsNotExist(err) {
 			log.Info().Str("filename", keyfilename).Msg("encryption key file not present")
@@ -319,6 +331,7 @@ func loadEncryptionSecretKey(keyfilename string) []byte {
 	}
 
 	// return a 32 byte hash of the secret (required for AES)
+	// fips compliant version of this is not implemented in -ce
 	hash := sha256.Sum256(content)
 
 	return hash[:]
@@ -343,8 +356,11 @@ func buildServer(flags *portainer.CLIFlags) portainer.Server {
 		}
 	}
 
+	// -ce can not ever be run in FIPS mode
+	fips.InitFIPS(false)
+
 	fileService := initFileService(*flags.Data)
-	encryptionKey := loadEncryptionSecretKey(*flags.SecretKeyName)
+	encryptionKey := loadEncryptionSecretKey(dbSecretPath(*flags.SecretKeyName))
 	if encryptionKey == nil {
 		log.Info().Msg("proceeding without encryption key")
 	}
@@ -377,7 +393,7 @@ func buildServer(flags *portainer.CLIFlags) portainer.Server {
 		log.Fatal().Err(err).Msg("failed initializing JWT service")
 	}
 
-	ldapService := &ldap.Service{}
+	ldapService := ldap.Service{}
 
 	oauthService := oauth.NewService()
 
@@ -386,13 +402,13 @@ func buildServer(flags *portainer.CLIFlags) portainer.Server {
 	// Setting insecureSkipVerify to true to preserve the old behaviour.
 	openAMTService := openamt.NewService(true)
 
-	cryptoService := &crypto.Service{}
+	cryptoService := crypto.Service{}
 
 	signatureService := initDigitalSignatureService()
 
 	edgeStacksService := edgestacks.NewService(dataStore)
 
-	sslService, err := initSSLService(*flags.AddrHTTPS, *flags.SSLCert, *flags.SSLKey, fileService, dataStore, shutdownTrigger)
+	sslService, err := initSSLService(*flags.AddrHTTPS, *flags.TLSCert, *flags.TLSKey, fileService, dataStore, shutdownTrigger)
 	if err != nil {
 		log.Fatal().Err(err).Msg("")
 	}
@@ -451,7 +467,7 @@ func buildServer(flags *portainer.CLIFlags) portainer.Server {
 
 	snapshotService.Start()
 
-	proxyManager.NewProxyFactory(dataStore, signatureService, reverseTunnelService, dockerClientFactory, kubernetesClientFactory, kubernetesTokenCacheManager, gitService, snapshotService)
+	proxyManager.NewProxyFactory(dataStore, signatureService, reverseTunnelService, dockerClientFactory, kubernetesClientFactory, kubernetesTokenCacheManager, gitService, snapshotService, jwtService)
 
 	helmPackageManager, err := initHelmPackageManager()
 	if err != nil {
@@ -559,6 +575,7 @@ func buildServer(flags *portainer.CLIFlags) portainer.Server {
 		Status:                      applicationStatus,
 		BindAddress:                 *flags.Addr,
 		BindAddressHTTPS:            *flags.AddrHTTPS,
+		CSP:                         *flags.CSP,
 		HTTPEnabled:                 sslDBSettings.HTTPEnabled,
 		AssetsPath:                  *flags.Assets,
 		DataStore:                   dataStore,

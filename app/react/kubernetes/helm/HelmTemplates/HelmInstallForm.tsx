@@ -1,4 +1,4 @@
-import { useRef } from 'react';
+import { useRef, useState } from 'react';
 import { Formik, FormikProps } from 'formik';
 import { useRouter } from '@uirouter/react';
 
@@ -7,11 +7,15 @@ import { useAnalytics } from '@/react/hooks/useAnalytics';
 import { useCanExit } from '@/react/hooks/useCanExit';
 import { useEnvironmentId } from '@/react/hooks/useEnvironmentId';
 
-import { confirmGenericDiscard } from '@@/modals/confirm';
+import { confirm, confirmGenericDiscard } from '@@/modals/confirm';
 import { Option } from '@@/form-components/PortainerSelect';
 
 import { Chart } from '../types';
-import { useUpdateHelmReleaseMutation } from '../queries/useUpdateHelmReleaseMutation';
+import { useUpdateHelmReleaseMutation } from '../helmReleaseQueries/useUpdateHelmReleaseMutation';
+import {
+  ChartVersion,
+  useHelmRepoVersions,
+} from '../helmChartSourceQueries/useHelmRepoVersions';
 
 import { HelmInstallInnerForm } from './HelmInstallInnerForm';
 import { HelmInstallFormValues } from './types';
@@ -20,22 +24,40 @@ type Props = {
   selectedChart: Chart;
   namespace?: string;
   name?: string;
+  isRepoAvailable: boolean;
 };
 
-export function HelmInstallForm({ selectedChart, namespace, name }: Props) {
+export function HelmInstallForm({
+  selectedChart,
+  namespace,
+  name,
+  isRepoAvailable,
+}: Props) {
   const environmentId = useEnvironmentId();
+  const [previewIsValid, setPreviewIsValid] = useState(false);
   const router = useRouter();
   const analytics = useAnalytics();
-  const versionOptions: Option<string>[] = selectedChart.versions.map(
+  const helmRepoVersionsQuery = useHelmRepoVersions(
+    selectedChart.name,
+    60 * 60 * 1000, // 1 hour
+    [
+      {
+        repo: selectedChart.repo,
+      },
+    ]
+  );
+  const versions = helmRepoVersionsQuery.data;
+  const versionOptions: Option<ChartVersion>[] = versions.map(
     (version, index) => ({
-      label: index === 0 ? `${version} (latest)` : version,
+      label: index === 0 ? `${version.Version} (latest)` : version.Version,
       value: version,
     })
   );
   const defaultVersion = versionOptions[0]?.value;
   const initialValues: HelmInstallFormValues = {
     values: '',
-    version: defaultVersion ?? '',
+    version: defaultVersion?.Version ?? '',
+    repo: defaultVersion?.Repo ?? selectedChart.repo ?? '',
   };
 
   const installHelmChartMutation = useUpdateHelmReleaseMutation(environmentId);
@@ -55,6 +77,9 @@ export function HelmInstallForm({ selectedChart, namespace, name }: Props) {
         namespace={namespace}
         name={name}
         versionOptions={versionOptions}
+        isVersionsLoading={helmRepoVersionsQuery.isInitialLoading}
+        isRepoAvailable={isRepoAvailable}
+        setPreviewIsValid={setPreviewIsValid}
       />
     </Formik>
   );
@@ -63,6 +88,17 @@ export function HelmInstallForm({ selectedChart, namespace, name }: Props) {
     if (!name || !namespace) {
       // Theoretically this should never happen and is mainly to keep typescript happy
       return;
+    }
+
+    if (!previewIsValid) {
+      const confirmed = await confirm({
+        title: 'Chart validation failed',
+        message:
+          'The Helm manifest preview validation failed, which may indicate configuration issues. This can be normal when creating new resources. Do you want to proceed with the installation?',
+      });
+      if (!confirmed) {
+        return;
+      }
     }
 
     await installHelmChartMutation.mutateAsync(

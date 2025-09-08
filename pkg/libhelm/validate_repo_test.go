@@ -1,15 +1,16 @@
 package libhelm
 
 import (
+	"net/http"
+	"net/http/httptest"
 	"testing"
 
 	"github.com/portainer/portainer/pkg/libhelm/test"
-	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func Test_ValidateHelmRepositoryURL(t *testing.T) {
 	test.EnsureIntegrationTest(t)
-	is := assert.New(t)
 
 	type testCase struct {
 		name    string
@@ -41,11 +42,47 @@ func Test_ValidateHelmRepositoryURL(t *testing.T) {
 				t.Parallel()
 				err := ValidateHelmRepositoryURL(tc.url, nil)
 				if tc.invalid {
-					is.Errorf(err, "error expected: %s", tc.url)
+					require.Error(t, err, "error expected: %s", tc.url)
 				} else {
-					is.NoError(err, "no error expected: %s", tc.url)
+					require.NoError(t, err, "no error expected: %s", tc.url)
 				}
 			})
 		}(test)
+	}
+}
+
+func TestValidateHelmRepositoryURL(t *testing.T) {
+	var fail bool
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if fail {
+			w.WriteHeader(http.StatusNotFound)
+
+			return
+		}
+	}))
+	defer srv.Close()
+
+	// Success
+	err := ValidateHelmRepositoryURL(srv.URL, nil)
+	require.NoError(t, err)
+
+	// Failure
+	fail = true
+
+	var failureURLs = []string{
+		"",
+		"!",
+		"oci://example.com",
+		"ftp://example.com",
+		srv.URL,
+	}
+
+	for _, url := range failureURLs {
+		err = ValidateHelmRepositoryURL(url, nil)
+		require.Error(t, err)
+
+		err = ValidateHelmRepositoryURL(srv.URL, nil)
+		require.Error(t, err)
 	}
 }

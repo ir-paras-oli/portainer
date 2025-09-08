@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/compose-spec/compose-go/v2/consts"
@@ -476,8 +477,20 @@ func Test_DeployWithRemoveOrphans(t *testing.T) {
 	}
 }
 
+type logger struct {
+	sync.Mutex
+	strings.Builder
+}
+
+func (l *logger) Write(p []byte) (n int, err error) {
+	l.Lock()
+	defer l.Unlock()
+
+	return l.Builder.Write(p)
+}
+
 func Test_DeployWithIgnoreOrphans(t *testing.T) {
-	var logOutput strings.Builder
+	var logOutput logger
 	oldLogger := zerolog.Logger
 	zerolog.Logger = zerolog.Output(&logOutput)
 	defer func() {
@@ -564,7 +577,7 @@ func Test_DeployWithIgnoreOrphans(t *testing.T) {
 	require.Equal(t, libstack.StatusCompleted, waitResult.Status)
 
 	logString := logOutput.String()
-	require.False(t, strings.Contains(logString, "Found orphan containers ([compose_ignore_orphans_test-service-1-1])"))
+	require.NotContains(t, logString, "Found orphan containers ([compose_ignore_orphans_test-service-1-1])")
 }
 
 func Test_MaxConcurrency(t *testing.T) {
@@ -597,7 +610,7 @@ func Test_MaxConcurrency(t *testing.T) {
 
 	w.withComposeService(ctx, filepaths, options, func(service api.Service, _ *types.Project) error {
 		if mockS, ok := service.(*mockComposeService); ok {
-			require.Equal(t, mockS.maxConcurrency, expectedMaxConcurrency)
+			require.Equal(t, expectedMaxConcurrency, mockS.maxConcurrency)
 		} else {
 			t.Fatalf("Expected mockComposeService but got %T", service)
 		}

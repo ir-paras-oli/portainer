@@ -6,15 +6,16 @@ import (
 	"github.com/docker/docker/api/types"
 	"github.com/docker/docker/api/types/swarm"
 	portainer "github.com/portainer/portainer/api"
-	portaineree "github.com/portainer/portainer/api"
 	dockerconsts "github.com/portainer/portainer/api/docker/consts"
 	"github.com/portainer/portainer/api/http/security"
 	"github.com/portainer/portainer/api/internal/testhelpers"
+
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestHandler_getDockerStacks(t *testing.T) {
-	environment := &portaineree.Endpoint{
+	environment := &portainer.Endpoint{
 		ID: 1,
 		SecuritySettings: portainer.EndpointSecuritySettings{
 			AllowStackManagementForRegularUsers: true,
@@ -46,7 +47,7 @@ func TestHandler_getDockerStacks(t *testing.T) {
 		},
 	}
 
-	stack1 := portaineree.Stack{
+	stack1 := portainer.Stack{
 		ID:         1,
 		Name:       "stack1",
 		EndpointID: 1,
@@ -54,8 +55,8 @@ func TestHandler_getDockerStacks(t *testing.T) {
 	}
 
 	datastore := testhelpers.NewDatastore(
-		testhelpers.WithEndpoints([]portaineree.Endpoint{*environment}),
-		testhelpers.WithStacks([]portaineree.Stack{
+		testhelpers.WithEndpoints([]portainer.Endpoint{*environment}),
+		testhelpers.WithStacks([]portainer.Stack{
 			stack1,
 			{
 				ID:         2,
@@ -69,7 +70,7 @@ func TestHandler_getDockerStacks(t *testing.T) {
 	stacksList, err := GetDockerStacks(datastore, &security.RestrictedRequestContext{
 		IsAdmin: true,
 	}, environment.ID, containers, services)
-	assert.NoError(t, err)
+	require.NoError(t, err)
 	assert.Len(t, stacksList, 3)
 
 	expectedStacks := []StackViewModel{

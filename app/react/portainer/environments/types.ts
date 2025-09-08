@@ -153,7 +153,6 @@ export type Environment = {
   EdgeID?: string;
   EdgeKey: string;
   EdgeCheckinInterval?: number;
-  QueryDate?: number;
   Heartbeat?: boolean;
   LastCheckInDate?: number;
   Name: string;
@@ -205,6 +204,8 @@ export enum EnvironmentCreationTypes {
 export enum ContainerEngine {
   Docker = 'docker',
   Podman = 'podman',
+  // an empty container engine means that the endpoint is a Kubernetes endpoint
+  Kubernetes = '',
 }
 
 export enum PlatformType {

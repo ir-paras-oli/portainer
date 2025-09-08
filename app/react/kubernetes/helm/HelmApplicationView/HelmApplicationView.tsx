@@ -11,14 +11,15 @@ import { Card } from '@@/Card';
 import { Alert } from '@@/Alert';
 
 import { HelmRelease } from '../types';
+import { useIsSystemNamespace } from '../../namespaces/queries/useIsSystemNamespace';
+import { useHelmRelease } from '../helmReleaseQueries/useHelmRelease';
+import { useHelmHistory } from '../helmReleaseQueries/useHelmHistory';
 
 import { HelmSummary } from './HelmSummary';
 import { ReleaseTabs } from './ReleaseDetails/ReleaseTabs';
-import { useHelmRelease } from './queries/useHelmRelease';
 import { ChartActions } from './ChartActions/ChartActions';
 import { HelmRevisionList } from './HelmRevisionList';
 import { HelmRevisionListSheet } from './HelmRevisionListSheet';
-import { useHelmHistory } from './queries/useHelmHistory';
 
 export function HelmApplicationView() {
   const environmentId = useEnvironmentId();
@@ -36,6 +37,8 @@ export function HelmApplicationView() {
     showResources: true,
     revision: selectedRevision,
   });
+
+  const isSystemNamespace = useIsSystemNamespace(namespace);
 
   return (
     <>
@@ -63,28 +66,30 @@ export function HelmApplicationView() {
                         />
                       </div>
                       <Authorized authorizations="K8sApplicationsW">
-                        <ChartActions
-                          environmentId={environmentId}
-                          releaseName={String(name)}
-                          namespace={String(namespace)}
-                          latestRevision={latestRevision ?? 1}
-                          earlistRevision={earlistRevision}
-                          selectedRevision={selectedRevision}
-                          release={helmReleaseQuery.data}
-                          updateRelease={(updatedRelease: HelmRelease) => {
-                            queryClient.setQueryData(
-                              [
-                                environmentId,
-                                'helm',
-                                'releases',
-                                namespace,
-                                name,
-                                true,
-                              ],
-                              updatedRelease
-                            );
-                          }}
-                        />
+                        {!isSystemNamespace && (
+                          <ChartActions
+                            environmentId={environmentId}
+                            releaseName={String(name)}
+                            namespace={String(namespace)}
+                            latestRevision={latestRevision ?? 1}
+                            earlistRevision={earlistRevision}
+                            selectedRevision={selectedRevision}
+                            release={helmReleaseQuery.data}
+                            updateRelease={(updatedRelease: HelmRelease) => {
+                              queryClient.setQueryData(
+                                [
+                                  environmentId,
+                                  'helm',
+                                  'releases',
+                                  namespace,
+                                  name,
+                                  true,
+                                ],
+                                updatedRelease
+                              );
+                            }}
+                          />
+                        )}
                       </Authorized>
                     </div>
                   </WidgetTitle>

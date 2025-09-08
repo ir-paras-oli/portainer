@@ -7,17 +7,18 @@ import (
 	"net/http"
 	"time"
 
+	gittypes "github.com/portainer/portainer/api/git/types"
+	models "github.com/portainer/portainer/api/http/models/kubernetes"
+	"github.com/portainer/portainer/api/roar"
+	"github.com/portainer/portainer/pkg/featureflags"
+	httperror "github.com/portainer/portainer/pkg/libhttp/error"
+
 	"github.com/docker/docker/api/types"
 	"github.com/docker/docker/api/types/image"
 	"github.com/docker/docker/api/types/network"
 	"github.com/docker/docker/api/types/system"
 	"github.com/docker/docker/api/types/volume"
-	gittypes "github.com/portainer/portainer/api/git/types"
-	models "github.com/portainer/portainer/api/http/models/kubernetes"
-	"github.com/portainer/portainer/pkg/featureflags"
-	httperror "github.com/portainer/portainer/pkg/libhttp/error"
 	"github.com/segmentio/encoding/json"
-
 	"golang.org/x/oauth2"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/version"
@@ -110,6 +111,7 @@ type (
 		AdminPassword             *string
 		AdminPasswordFile         *string
 		Assets                    *string
+		CSP                       *bool
 		Data                      *string
 		FeatureFlags              *[]string
 		EnableEdgeComputeFeatures *bool
@@ -120,14 +122,12 @@ type (
 		Templates                 *string
 		TLS                       *bool
 		TLSSkipVerify             *bool
+		HasTLSCacert              *bool
 		TLSCacert                 *string
 		TLSCert                   *string
 		TLSKey                    *string
 		HTTPDisabled              *bool
 		HTTPEnabled               *bool
-		SSL                       *bool
-		SSLCert                   *string
-		SSLKey                    *string
 		Rollback                  *bool
 		SnapshotInterval          *string
 		BaseURL                   *string
@@ -214,26 +214,34 @@ type (
 
 	// DockerSnapshot represents a snapshot of a specific Docker environment(endpoint) at a specific time
 	DockerSnapshot struct {
-		Time                    int64             `json:"Time"`
-		DockerVersion           string            `json:"DockerVersion"`
-		Swarm                   bool              `json:"Swarm"`
-		TotalCPU                int               `json:"TotalCPU"`
-		TotalMemory             int64             `json:"TotalMemory"`
-		ContainerCount          int               `json:"ContainerCount"`
-		RunningContainerCount   int               `json:"RunningContainerCount"`
-		StoppedContainerCount   int               `json:"StoppedContainerCount"`
-		HealthyContainerCount   int               `json:"HealthyContainerCount"`
-		UnhealthyContainerCount int               `json:"UnhealthyContainerCount"`
-		VolumeCount             int               `json:"VolumeCount"`
-		ImageCount              int               `json:"ImageCount"`
-		ServiceCount            int               `json:"ServiceCount"`
-		StackCount              int               `json:"StackCount"`
-		SnapshotRaw             DockerSnapshotRaw `json:"DockerSnapshotRaw"`
-		NodeCount               int               `json:"NodeCount"`
-		GpuUseAll               bool              `json:"GpuUseAll"`
-		GpuUseList              []string          `json:"GpuUseList"`
-		IsPodman                bool              `json:"IsPodman"`
-		DiagnosticsData         *DiagnosticsData  `json:"DiagnosticsData"`
+		Time                    int64               `json:"Time"`
+		DockerVersion           string              `json:"DockerVersion"`
+		Swarm                   bool                `json:"Swarm"`
+		TotalCPU                int                 `json:"TotalCPU"`
+		TotalMemory             int64               `json:"TotalMemory"`
+		ContainerCount          int                 `json:"ContainerCount"`
+		RunningContainerCount   int                 `json:"RunningContainerCount"`
+		StoppedContainerCount   int                 `json:"StoppedContainerCount"`
+		HealthyContainerCount   int                 `json:"HealthyContainerCount"`
+		UnhealthyContainerCount int                 `json:"UnhealthyContainerCount"`
+		VolumeCount             int                 `json:"VolumeCount"`
+		ImageCount              int                 `json:"ImageCount"`
+		ServiceCount            int                 `json:"ServiceCount"`
+		StackCount              int                 `json:"StackCount"`
+		SnapshotRaw             DockerSnapshotRaw   `json:"DockerSnapshotRaw"`
+		NodeCount               int                 `json:"NodeCount"`
+		GpuUseAll               bool                `json:"GpuUseAll"`
+		GpuUseList              []string            `json:"GpuUseList"`
+		IsPodman                bool                `json:"IsPodman"`
+		DiagnosticsData         *DiagnosticsData    `json:"DiagnosticsData"`
+		PerformanceMetrics      *PerformanceMetrics `json:"PerformanceMetrics"`
+	}
+
+	// PerformanceMetrics represents the performance metrics of a Docker, Swarm, Podman, and Kubernetes environments
+	PerformanceMetrics struct {
+		CPUUsage     float64 `json:"CPUUsage,omitempty"`
+		MemoryUsage  float64 `json:"MemoryUsage,omitempty"`
+		NetworkUsage float64 `json:"NetworkUsage,omitempty"`
 	}
 
 	// DockerContainerSnapshot is an extent of Docker's Container struct
@@ -256,12 +264,15 @@ type (
 	// EdgeGroup represents an Edge group
 	EdgeGroup struct {
 		// EdgeGroup Identifier
-		ID           EdgeGroupID  `json:"Id" example:"1"`
-		Name         string       `json:"Name"`
-		Dynamic      bool         `json:"Dynamic"`
-		TagIDs       []TagID      `json:"TagIds"`
-		Endpoints    []EndpointID `json:"Endpoints"`
-		PartialMatch bool         `json:"PartialMatch"`
+		ID           EdgeGroupID           `json:"Id" example:"1"`
+		Name         string                `json:"Name"`
+		Dynamic      bool                  `json:"Dynamic"`
+		TagIDs       []TagID               `json:"TagIds"`
+		EndpointIDs  roar.Roar[EndpointID] `json:"EndpointIds"`
+		PartialMatch bool                  `json:"PartialMatch"`
+
+		// Deprecated: only used for API responses
+		Endpoints []EndpointID `json:"Endpoints"`
 	}
 
 	// EdgeGroupID represents an Edge group identifier
@@ -437,8 +448,6 @@ type (
 		AMTDeviceGUID string `json:"AMTDeviceGUID,omitempty" example:"4c4c4544-004b-3910-8037-b6c04f504633"`
 		// LastCheckInDate mark last check-in date on checkin
 		LastCheckInDate int64
-		// QueryDate of each query with the endpoints list
-		QueryDate int64
 		// Heartbeat indicates the heartbeat status of an edge environment
 		Heartbeat bool `json:"Heartbeat" example:"true"`
 
@@ -594,6 +603,12 @@ type (
 		ProjectPath string `json:"ProjectPath"`
 	}
 
+	// GithubRegistryData represents data required for Github registry to work
+	GithubRegistryData struct {
+		UseOrganisation  bool   `json:"UseOrganisation"`
+		OrganisationName string `json:"OrganisationName"`
+	}
+
 	HelmUserRepositoryID int
 
 	// HelmUserRepositories stores a Helm repository URL for the given user
@@ -662,12 +677,13 @@ type (
 
 	// KubernetesSnapshot represents a snapshot of a specific Kubernetes environment(endpoint) at a specific time
 	KubernetesSnapshot struct {
-		Time              int64            `json:"Time"`
-		KubernetesVersion string           `json:"KubernetesVersion"`
-		NodeCount         int              `json:"NodeCount"`
-		TotalCPU          int64            `json:"TotalCPU"`
-		TotalMemory       int64            `json:"TotalMemory"`
-		DiagnosticsData   *DiagnosticsData `json:"DiagnosticsData"`
+		Time               int64               `json:"Time"`
+		KubernetesVersion  string              `json:"KubernetesVersion"`
+		NodeCount          int                 `json:"NodeCount"`
+		TotalCPU           int64               `json:"TotalCPU"`
+		TotalMemory        int64               `json:"TotalMemory"`
+		DiagnosticsData    *DiagnosticsData    `json:"DiagnosticsData"`
+		PerformanceMetrics *PerformanceMetrics `json:"PerformanceMetrics"`
 	}
 
 	// KubernetesConfiguration represents the configuration of a Kubernetes environment(endpoint)
@@ -813,6 +829,7 @@ type (
 		Password                string                           `json:"Password,omitempty" example:"registry_password"`
 		ManagementConfiguration *RegistryManagementConfiguration `json:"ManagementConfiguration"`
 		Gitlab                  GitlabRegistryData               `json:"Gitlab"`
+		Github                  GithubRegistryData               `json:"Github"`
 		Quay                    QuayRegistryData                 `json:"Quay"`
 		Ecr                     EcrData                          `json:"Ecr"`
 		RegistryAccesses        RegistryAccesses                 `json:"RegistryAccesses"`
@@ -1521,10 +1538,42 @@ type (
 
 	// GitService represents a service for managing Git
 	GitService interface {
-		CloneRepository(destination string, repositoryURL, referenceName, username, password string, tlsSkipVerify bool) error
-		LatestCommitID(repositoryURL, referenceName, username, password string, tlsSkipVerify bool) (string, error)
-		ListRefs(repositoryURL, username, password string, hardRefresh bool, tlsSkipVerify bool) ([]string, error)
-		ListFiles(repositoryURL, referenceName, username, password string, dirOnly, hardRefresh bool, includeExts []string, tlsSkipVerify bool) ([]string, error)
+		CloneRepository(
+			destination string,
+			repositoryURL,
+			referenceName,
+			username,
+			password string,
+			authType gittypes.GitCredentialAuthType,
+			tlsSkipVerify bool,
+		) error
+		LatestCommitID(
+			repositoryURL,
+			referenceName,
+			username,
+			password string,
+			authType gittypes.GitCredentialAuthType,
+			tlsSkipVerify bool,
+		) (string, error)
+		ListRefs(
+			repositoryURL,
+			username,
+			password string,
+			authType gittypes.GitCredentialAuthType,
+			hardRefresh bool,
+			tlsSkipVerify bool,
+		) ([]string, error)
+		ListFiles(
+			repositoryURL,
+			referenceName,
+			username,
+			password string,
+			authType gittypes.GitCredentialAuthType,
+			dirOnly,
+			hardRefresh bool,
+			includeExts []string,
+			tlsSkipVerify bool,
+		) ([]string, error)
 	}
 
 	// OpenAMTService represents a service for managing OpenAMT
@@ -1730,9 +1779,9 @@ type (
 
 const (
 	// APIVersion is the version number of the Portainer API
-	APIVersion = "2.31.0"
+	APIVersion = "2.33.0-rc1"
 	// Support annotation for the API version ("STS" for Short-Term Support or "LTS" for Long-Term Support)
-	APIVersionSupport = "STS"
+	APIVersionSupport = "LTS"
 	// Edition is what this edition of Portainer is called
 	Edition = PortainerCE
 	// ComposeSyntaxMaxVersion is a maximum supported version of the docker compose syntax
@@ -1741,8 +1790,10 @@ const (
 	AssetsServerURL = "https://portainer-io-assets.sfo2.digitaloceanspaces.com"
 	// MessageOfTheDayURL represents the URL where Portainer MOTD message can be retrieved
 	MessageOfTheDayURL = AssetsServerURL + "/motd.json"
+	// ReleasesURL represents the URL used to retrieve all releases of Portainer
+	ReleasesURL = "https://api.github.com/repos/portainer/portainer/releases"
 	// VersionCheckURL represents the URL used to retrieve the latest version of Portainer
-	VersionCheckURL = "https://api.github.com/repos/portainer/portainer/releases/latest"
+	VersionCheckURL = ReleasesURL + "/latest"
 	// PortainerAgentHeader represents the name of the header available in any agent response
 	PortainerAgentHeader = "Portainer-Agent"
 	// PortainerAgentEdgeIDHeader represent the name of the header containing the Edge ID associated to an agent/agent cluster
@@ -1791,6 +1842,8 @@ const (
 	LicenseCheckInURL = LicenseServerBaseURL + "/licenses/checkin"
 	// TrustedOriginsEnvVar is the environment variable used to set the trusted origins for CSRF protection
 	TrustedOriginsEnvVar = "TRUSTED_ORIGINS"
+	// CSPEnvVar is the environment variable used to enable/disable the Content Security Policy
+	CSPEnvVar = "CSP"
 )
 
 // List of supported features
@@ -1960,6 +2013,8 @@ const (
 	DockerHubRegistry
 	// EcrRegistry represents an ECR registry
 	EcrRegistry
+	// Github container registry
+	GithubRegistry
 )
 
 const (

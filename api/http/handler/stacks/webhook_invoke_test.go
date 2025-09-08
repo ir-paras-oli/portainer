@@ -11,6 +11,7 @@ import (
 
 	"github.com/gofrs/uuid"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestHandler_webhookInvoke(t *testing.T) {
@@ -30,28 +31,28 @@ func TestHandler_webhookInvoke(t *testing.T) {
 	t.Run("invalid uuid results in http.StatusBadRequest", func(t *testing.T) {
 		w := httptest.NewRecorder()
 		req := newRequest("notuuid")
-		h.Router.ServeHTTP(w, req)
+		h.ServeHTTP(w, req)
 		assert.Equal(t, http.StatusBadRequest, w.Code)
 	})
 
 	t.Run("registered webhook ID in http.StatusNoContent", func(t *testing.T) {
 		w := httptest.NewRecorder()
 		req := newRequest(webhookID)
-		h.Router.ServeHTTP(w, req)
+		h.ServeHTTP(w, req)
 		assert.Equal(t, http.StatusNoContent, w.Code)
 	})
 
 	t.Run("unregistered webhook ID in http.StatusNotFound", func(t *testing.T) {
 		w := httptest.NewRecorder()
 		req := newRequest(newGuidString(t))
-		h.Router.ServeHTTP(w, req)
+		h.ServeHTTP(w, req)
 		assert.Equal(t, http.StatusNotFound, w.Code)
 	})
 }
 
 func newGuidString(t *testing.T) string {
 	uuid, err := uuid.NewV4()
-	assert.NoError(t, err)
+	require.NoError(t, err)
 
 	return uuid.String()
 }

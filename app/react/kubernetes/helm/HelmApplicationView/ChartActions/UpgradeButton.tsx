@@ -12,10 +12,13 @@ import { Tooltip } from '@@/Tip/Tooltip';
 import { Link } from '@@/Link';
 
 import { HelmRelease, UpdateHelmReleasePayload } from '../../types';
-import { useUpdateHelmReleaseMutation } from '../../queries/useUpdateHelmReleaseMutation';
-import { useHelmRepoVersions } from '../../queries/useHelmRepoVersions';
-import { useHelmRelease } from '../queries/useHelmRelease';
-import { useHelmRegistries } from '../../queries/useHelmRegistries';
+import { useUpdateHelmReleaseMutation } from '../../helmReleaseQueries/useUpdateHelmReleaseMutation';
+import { useHelmRepoVersions } from '../../helmChartSourceQueries/useHelmRepoVersions';
+import { useHelmRelease } from '../../helmReleaseQueries/useHelmRelease';
+import {
+  flattenHelmRegistries,
+  useUserHelmRepositories,
+} from '../../helmChartSourceQueries/useHelmRepositories';
 
 import { openUpgradeHelmModal } from './UpgradeHelmModal';
 
@@ -36,19 +39,24 @@ export function UpgradeButton({
   const [useCache, setUseCache] = useState(true);
   const updateHelmReleaseMutation = useUpdateHelmReleaseMutation(environmentId);
 
-  const registriesQuery = useHelmRegistries();
+  const userRepositoriesQuery = useUserHelmRepositories({
+    select: flattenHelmRegistries,
+  });
   const helmRepoVersionsQuery = useHelmRepoVersions(
     release?.chart.metadata?.name || '',
     60 * 60 * 1000, // 1 hour
-    registriesQuery.data,
+    userRepositoriesQuery.data?.map((repo) => ({
+      repo,
+    })),
     useCache
   );
   const versions = helmRepoVersionsQuery.data;
 
   // Combined loading state
   const isLoading =
-    registriesQuery.isInitialLoading || helmRepoVersionsQuery.isFetching; // use 'isFetching' for helmRepoVersionsQuery because we want to show when it's refetching
-  const isError = registriesQuery.isError || helmRepoVersionsQuery.isError;
+    userRepositoriesQuery.isInitialLoading || helmRepoVersionsQuery.isFetching; // use 'isFetching' for helmRepoVersionsQuery because we want to show when it's refetching
+  const isError =
+    userRepositoriesQuery.isError || helmRepoVersionsQuery.isError;
   const latestVersionQuery = useHelmRelease(
     environmentId,
     releaseName,
@@ -101,7 +109,7 @@ export function UpgradeButton({
         icon={ArrowUp}
         size="medium"
       >
-        Upgrade
+        Edit/Upgrade
       </LoadingButton>
       {isLoading && (
         <InlineLoader
@@ -161,7 +169,9 @@ export function UpgradeButton({
   async function handleUpgrade() {
     const submittedUpgradeValues = await openUpgradeHelmModal(
       editableHelmRelease,
-      filteredVersions
+      filteredVersions,
+      release?.manifest || '',
+      environmentId
     );
 
     if (submittedUpgradeValues) {
